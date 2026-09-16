@@ -1,0 +1,3 @@
+[submodule "lib/line-navigator"]
+	path = lib/line-navigator
+	url = https://github.com/apurin/line-navigator.git

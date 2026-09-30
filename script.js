@@ -21,13 +21,17 @@ const DEFAULT_PATTERN_SETTINGS = {
             pattern: '^(\\d{4}-\\d{2}-\\d{2}[\\sT]\\d{2}:\\d{2}:\\d{2}\\.?\\d*\\+\\d{2}?\\:\\d{2}?)',
             style: 'info',
             applyWholeLine: false,
-            xAxisEnabled: false
+            xAxisEnabled: false,
+            includeInFrequency: false,
+            enabled: true
         },
         {
             pattern: '.*ERROR.*',
             style: 'error',
             applyWholeLine: true,
-            xAxisEnabled: false
+            xAxisEnabled: false,
+            includeInFrequency: true,
+            enabled: true
         }
     ]
 };
@@ -60,7 +64,7 @@ function escapeHtml(value) {
         .replace(/'/g, '&#039;');
 }
 
-function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLine = true, xAxisEnabled = false) {
+function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLine = true, xAxisEnabled = false, includeInFrequency = true, enabled = true) {
     const row = document.createElement('div');
     row.className = 'pattern-row row g-2 align-items-center mb-2';
 
@@ -94,8 +98,20 @@ function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLin
         </div>
         <div class="col-2 d-flex align-items-center justify-content-center">
             <div class="form-check form-switch mb-0">
+                <input class="form-check-input pattern-enabled-toggle" type="checkbox" role="switch">
+                <label class="form-check-label small">On</label>
+            </div>
+        </div>
+        <div class="col-2 d-flex align-items-center justify-content-center">
+            <div class="form-check form-switch mb-0">
                 <input class="form-check-input pattern-x-axis-toggle" type="checkbox" role="switch">
                 <label class="form-check-label small">X-axis</label>
+            </div>
+        </div>
+        <div class="col-2 d-flex align-items-center justify-content-center">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input pattern-frequency-toggle" type="checkbox" role="switch">
+                <label class="form-check-label small">Graph</label>
             </div>
         </div>
         <div class="col-2 d-grid">
@@ -105,15 +121,33 @@ function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLin
 
     const styleSelect = row.querySelector('.pattern-style-select');
     const lineToggle = row.querySelector('.pattern-line-toggle');
+    const enabledToggleInput = row.querySelector('.pattern-enabled-toggle');
     const xAxisToggleInput = row.querySelector('.pattern-x-axis-toggle');
+    const frequencyToggleInput = row.querySelector('.pattern-frequency-toggle');
     styleSelect.value = styleValue;
     lineToggle.checked = applyWholeLine;
+    enabledToggleInput.checked = enabled;
     xAxisToggleInput.checked = xAxisEnabled;
+    frequencyToggleInput.checked = includeInFrequency && !xAxisEnabled;
+    frequencyToggleInput.disabled = xAxisEnabled;
 
     row.querySelector('.pattern-input').addEventListener('input', refreshLogFromPatternControls);
     styleSelect.addEventListener('change', refreshLogFromPatternControls);
     lineToggle.addEventListener('change', refreshLogFromPatternControls);
+    enabledToggleInput.addEventListener('change', refreshLogFromPatternControls);
     xAxisToggleInput.addEventListener('change', refreshLogFromPatternControls);
+    frequencyToggleInput.addEventListener('change', refreshLogFromPatternControls);
+    xAxisToggleInput.addEventListener('change', () => {
+        if (xAxisToggleInput.checked) {
+            frequencyToggleInput.checked = false;
+            frequencyToggleInput.disabled = true;
+        } else {
+            frequencyToggleInput.disabled = false;
+            if (!frequencyToggleInput.checked) {
+                frequencyToggleInput.checked = true;
+            }
+        }
+    });
     row.querySelector('.remove-pattern').addEventListener('click', () => {
         if (patternList.querySelectorAll('.pattern-row').length > 1) {
             row.remove();
@@ -129,10 +163,12 @@ function getPatternRules() {
         const patternInput = row.querySelector('.pattern-input');
         const styleSelect = row.querySelector('.pattern-style-select');
         const lineToggle = row.querySelector('.pattern-line-toggle');
+        const enabledToggle = row.querySelector('.pattern-enabled-toggle');
         const xAxisEnabled = row.querySelector('.pattern-x-axis-toggle');
+        const frequencyToggle = row.querySelector('.pattern-frequency-toggle');
         const rawPattern = patternInput.value.trim();
 
-        if (!rawPattern) {
+        if (!rawPattern || !enabledToggle.checked) {
             return null;
         }
 
@@ -141,7 +177,9 @@ function getPatternRules() {
                 regex: new RegExp(rawPattern, 'i'),
                 style: styleSelect.value,
                 applyWholeLine: lineToggle.checked,
-                xAxisEnabled: xAxisEnabled.checked
+                xAxisEnabled: xAxisEnabled.checked,
+                includeInFrequency: !xAxisEnabled.checked && frequencyToggle.checked,
+                enabled: enabledToggle.checked
             };
         } catch (error) {
             console.warn('Invalid regex pattern:', error.message);
@@ -155,7 +193,9 @@ function getPatternSettings() {
         pattern: row.querySelector('.pattern-input').value,
         style: row.querySelector('.pattern-style-select').value,
         applyWholeLine: row.querySelector('.pattern-line-toggle').checked,
-        xAxisEnabled: row.querySelector('.pattern-x-axis-toggle').checked
+        enabled: row.querySelector('.pattern-enabled-toggle').checked,
+        xAxisEnabled: row.querySelector('.pattern-x-axis-toggle').checked,
+        includeInFrequency: row.querySelector('.pattern-frequency-toggle').checked
     }));
 
     return {
@@ -210,13 +250,17 @@ function normalizePatternSettings(rawSettings) {
             const patternValue = typeof pattern.pattern === 'string' ? pattern.pattern : '';
             const styleValue = typeof pattern.style === 'string' ? pattern.style : 'error';
             const applyWholeLine = Boolean(pattern.applyWholeLine);
+            const enabled = pattern.enabled !== false;
             const xAxisEnabled = Boolean(pattern.xAxisEnabled);
+            const includeInFrequency = xAxisEnabled ? false : pattern.includeInFrequency !== false;
 
             return {
                 pattern: patternValue,
                 style: styleValue,
                 applyWholeLine,
-                xAxisEnabled
+                enabled,
+                xAxisEnabled,
+                includeInFrequency
             };
         }).filter((pattern) => pattern && pattern.pattern.trim())
         : [];
@@ -245,7 +289,14 @@ function applyPatternSettings(settings) {
 
     for (const pattern of safeSettings.patterns) {
         patternList.appendChild(
-            createPatternRow(pattern.pattern, pattern.style, pattern.applyWholeLine, pattern.xAxisEnabled)
+            createPatternRow(
+                pattern.pattern,
+                pattern.style,
+                pattern.applyWholeLine,
+                pattern.xAxisEnabled,
+                pattern.includeInFrequency,
+                pattern.enabled
+            )
         );
     }
 
@@ -513,13 +564,17 @@ function buildFrequencyGraphData(lines, rules, timestampRule) {
     entries.sort((left, right) => left.timestamp - right.timestamp);
     const bucketSize = getFrequencyBucketSize(entries[0].timestamp, entries[entries.length - 1].timestamp);
     const bucketCount = Math.max(1, Math.floor((entries[entries.length - 1].timestamp - entries[0].timestamp) / bucketSize) + 1);
-    const series = rules.map((rule) => ({
+    const series = rules.filter((rule) => rule.includeInFrequency).map((rule) => ({
         rule,
         label: rule.regex.source,
         style: rule.style,
         buckets: new Array(bucketCount).fill(0),
         total: 0
     }));
+
+    if (!series.length) {
+        return null;
+    }
 
     for (const entry of entries) {
         const bucketIndex = Math.min(

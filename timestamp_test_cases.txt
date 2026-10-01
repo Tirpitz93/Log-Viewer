@@ -1,0 +1,42 @@
+================================================================================
+TIMESTAMP TEST SUITE GENERATED ON 2026-10-01
+================================================================================
+
+--- 1. STANDARD LOGGING FORMATS ---
+2026-10-01T11:44:00Z                      # ISO 8601 (UTC)
+2026-10-01T11:44:00.123456+01:00          # RFC 3339 (Sub-millisecond & Explicit Offset)
+01/Oct/2026:11:44:00 +0100                 # Apache / Nginx Common Log Format (CLF)
+Oct  1 11:44:00                           # Syslog RFC 3164 (Legacy, no year, double-space day)
+2026-10-01T11:44:00.123Z                  # Syslog RFC 5424 (Modern)
+Thu Oct  1 11:44:00 2026                  # Python asctime / ANSI C CTIME
+
+--- 2. DATABASE & SQL ENGINE FORMATS ---
+2026-10-01 11:44:00                       # SQL Standard / ODBC DATETIME
+2026-10-01 11:44:00.123456-05             # PostgreSQL (High-precision with truncated offset)
+01-OCT-26 11.44.00.123456000 AM           # Oracle TIMESTAMP (Case-sensitive, period separators)
+20261001114400                            # MySQL Pure Numeric / Legacy TIMESTAMP
+
+--- 3. EPOCHS AND INTEGER SUBSTRATES ---
+1790855040                                # Standard Unix Epoch (Seconds)
+1790855040000                             # Unix Epoch (Milliseconds - JavaScript)
+1790855040000000                          # Unix Epoch (Microseconds - Python/Go)
+134346758400000000                        # Windows File Time / NTFS (100-nanosecond units from 1601)
+3999949440                                # Mac HFS+ / Network Time Protocol (NTP) Epoch (from 1900/1904)
+
+--- 4. EDGE CASES & MALICIOUS FORMATTING ---
+2026-12-31T23:59:60Z                      # Leap Second Validation
+2026-10-01T11:44:00+05:45                 # Fractional Timezone Offset (Nepal Standard Time)
+2026-10-01T11:44:00+12:45                 # Fractional Timezone Offset (Chatham Islands DST)
++0000-10-01T11:44:00Z                     # ISO 8601 Expanded Notation (Year Zero)
+-0044-03-15T12:00:00Z                     # ISO 8601 Expanded Notation (Negative Year / 44 BC)
+2026-10-01T11:44:00.12345678901234567890Z # Extreme Sub-second Precision (Arbitrary length)
+2026-10-01T11:44:00-00:00                 # Explicit Negative Zero Offset (RFC 3339 special meaning)
+2026-10-01T11:44:00 GMT+0100 (BST)         # Redundant Metadata Wrapper
+2026-9-1T9:4:0.3Z                         # Lexicographical Sort Failure (Missing leading zeros)
+
+--- 5. WEIRD, WONDERFUL, AND ARCHAIC SYSTEMS ---
+@531                                      # Swatch Internet Time (.beats)
+Thu, 01 Oct 2026 11:44:00 +0100           # Internet Email Standard (RFC 2822 / MIME)
+011144Z OCT 26                            # Military / Nautical ZULU Variant (DDHHMMZ MMM YY)
+46296.48889                               # Excel Serialization (Days since Dec 30, 1899)
+================================================================================

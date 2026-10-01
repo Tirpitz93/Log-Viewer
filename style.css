@@ -1,35 +1,14 @@
-html,
-body {
-    height: 100%;
-}
-
 body {
     background-color: #f5f7fb;
     color: #1f2937;
     padding: 24px 0;
     font-family: "Segoe UI", sans-serif;
-    min-height: 100vh;
 }
 
 .container {
     max-width: 100%;
     margin: 0 auto;
     padding: 0 12px;
-    min-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-}
-
-.container > .row:last-child {
-    flex: 1 1 auto;
-    min-height: 0;
-}
-
-.container > .row:last-child > .col-lg-9,
-.container > .row:last-child > .col-lg-3 {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
 }
 
 h1 {
@@ -39,10 +18,8 @@ h1 {
 }
 
 .log-viewer {
-    min-height: 0;
-    height: 100%;
-    max-height: none;
-    flex: 1 1 auto;
+    min-height: 480px;
+    max-height: 75vh;
     overflow: auto;
     background: #ffffff;
     border: 1px solid #dfe4eb;
@@ -91,8 +68,6 @@ h1 {
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     padding: 16px;
-    height: 100%;
-    overflow: auto;
 }
 
 .button-row {

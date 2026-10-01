@@ -12,18 +12,20 @@ const importPatternsInput = document.getElementById('import-patterns');
 const timestampRenderingSelect = document.getElementById('timestamp-rendering');
 const frequencyGraphPanel = document.getElementById('frequency-graph-panel');
 const frequencyGraph = document.getElementById('frequency-graph');
+const graphUpdateDelayInput = document.getElementById('graph-update-delay');
 const frequencyBinCountInput = document.getElementById('frequency-bin-count');
 const DEFAULT_PATTERN_SETTINGS = {
     xAxisEnabled: false,
     highlightEnabled: false,
     timestampRendering: 'absolute',
+    graphUpdateDelayMs: 200,
     frequencyBinCount: 24,
     patterns: [
         {
-            pattern: '^(\\d{4}-\\d{2}-\\d{2}[\\sT]\\d{2}:\\d{2}:\\d{2}\\.?\\d*\\+\\d{2}?\\:\\d{2}?)',
+            pattern: '^(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[\\sT](?<hour>\\d{2}):(?<minute>\\d{2}):(?<second>\\d{2})(?:\\.(?<ms>\\d+))?(?<tz>[+-]\\d{2}:?\\d{2})?',
             style: 'info',
             applyWholeLine: false,
-            xAxisEnabled: false,
+            xAxisEnabled: true,
             includeInFrequency: false,
             enabled: true
         },
@@ -42,7 +44,10 @@ const LEGACY_PATTERN_SETTINGS_STORAGE_KEY = 'log-viewer.pattern-settings';
 
 let currentNavigator = null;
 let currentLines = [];
+let currentLineEntries = [];
+let currentPatternRules = [];
 let activeFileName = 'dummy.log';
+let pendingGraphRenderTimeoutId = null;
 const fallbackDummyLog = `2026-09-16 08:00:00 INFO Server started successfully.
 2026-09-16 08:00:05 WARN Cache miss for /health probe.
 2026-09-16 08:00:17 ERROR Failed to write to database.
@@ -202,9 +207,10 @@ function getPatternSettings() {
     }));
 
     return {
-        xAxisEnabled: xAxisToggle.checked,
-        highlightEnabled: highlightToggle.checked,
+        // xAxisEnabled: xAxisToggle.checked,
+        // highlightEnabled: highlightToggle.checked,
         timestampRendering: timestampRenderingSelect.value,
+        graphUpdateDelayMs: getGraphUpdateDelayMs(),
         frequencyBinCount: getFrequencyBinCount(),
         patterns
     };
@@ -239,9 +245,23 @@ function getDefaultPatternSettings() {
         xAxisEnabled: DEFAULT_PATTERN_SETTINGS.xAxisEnabled,
         highlightEnabled: DEFAULT_PATTERN_SETTINGS.highlightEnabled,
         timestampRendering: DEFAULT_PATTERN_SETTINGS.timestampRendering,
+        graphUpdateDelayMs: DEFAULT_PATTERN_SETTINGS.graphUpdateDelayMs,
         frequencyBinCount: DEFAULT_PATTERN_SETTINGS.frequencyBinCount,
         patterns: DEFAULT_PATTERN_SETTINGS.patterns.map((pattern) => ({...pattern}))
     };
+}
+
+function normalizeGraphUpdateDelayMs(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return DEFAULT_PATTERN_SETTINGS.graphUpdateDelayMs;
+    }
+
+    return Math.min(5000, Math.max(0, parsed));
+}
+
+function getGraphUpdateDelayMs() {
+    return normalizeGraphUpdateDelayMs(graphUpdateDelayInput.value);
 }
 
 function normalizeFrequencyBinCount(value) {
@@ -295,6 +315,7 @@ function normalizePatternSettings(rawSettings) {
         timestampRendering: isValidTimestampRendering(rawSettings.timestampRendering)
             ? rawSettings.timestampRendering
             : DEFAULT_PATTERN_SETTINGS.timestampRendering,
+        graphUpdateDelayMs: normalizeGraphUpdateDelayMs(rawSettings.graphUpdateDelayMs),
         frequencyBinCount: normalizeFrequencyBinCount(rawSettings.frequencyBinCount),
         patterns: safePatterns
     };
@@ -326,6 +347,7 @@ function applyPatternSettings(settings) {
     timestampRenderingSelect.value = isValidTimestampRendering(safeSettings.timestampRendering)
         ? safeSettings.timestampRendering
         : DEFAULT_PATTERN_SETTINGS.timestampRendering;
+    graphUpdateDelayInput.value = normalizeGraphUpdateDelayMs(safeSettings.graphUpdateDelayMs);
     frequencyBinCountInput.value = normalizeFrequencyBinCount(safeSettings.frequencyBinCount);
 }
 
@@ -380,7 +402,8 @@ function getPatternMatch(line, rules) {
                 match,
                 value: match[1] || match[0],
                 start: match.index,
-                end: match.index + match[0].length
+                end: match.index + match[0].length,
+                groups: match.groups || null
             });
         }
     }
@@ -396,6 +419,10 @@ function getPatternMatch(line, rules) {
 
 function getTimestampSourceRule(rules) {
     return rules.find((rule) => rule.xAxisEnabled) || null;
+}
+
+function getTimestampMatch(matches) {
+    return matches.find((matchObj) => matchObj.rule.xAxisEnabled) || null;
 }
 
 // function getSeverityClass(line) {
@@ -414,7 +441,53 @@ function getTimestampSourceRule(rules) {
 //     return 'normal';
 // }
 
+function parseTimestampFromNamedGroups(groups) {
+    if (!groups || typeof groups !== 'object') {
+        return null;
+    }
+
+    const {year, month, day, hour, minute, second, ms, tz} = groups;
+    if (!year || !month || !day || !hour || !minute || !second) {
+        return null;
+    }
+
+    const safeYear = Number.parseInt(year, 10);
+    const safeMonth = Number.parseInt(month, 10) - 1;
+    const safeDay = Number.parseInt(day, 10);
+    const safeHour = Number.parseInt(hour, 10);
+    const safeMinute = Number.parseInt(minute, 10);
+    const safeSecond = Number.parseInt(second, 10);
+    const safeMs = ms ? Number.parseInt(ms.slice(0, 3).padEnd(3, '0'), 10) : 0;
+
+    if (Number.isNaN(safeYear) || Number.isNaN(safeMonth) || Number.isNaN(safeDay) ||
+        Number.isNaN(safeHour) || Number.isNaN(safeMinute) || Number.isNaN(safeSecond)) {
+        return null;
+    }
+
+    let date = new Date(safeYear, safeMonth, safeDay, safeHour, safeMinute, safeSecond, safeMs);
+    if (!tz || tz === '') {
+        return date;
+    }
+
+    const tzMatch = tz.match(/([+-])(\d{2}):?(\d{2})/);
+    if (!tzMatch) {
+        return date;
+    }
+
+    const tzSign = tzMatch[1] === '+' ? 1 : -1;
+    const tzHours = Number.parseInt(tzMatch[2], 10);
+    const tzMinutes = Number.parseInt(tzMatch[3], 10);
+    const tzOffsetMs = tzSign * (tzHours * 3600000 + tzMinutes * 60000);
+    const localOffsetMs = date.getTimezoneOffset() * 60000;
+
+    return new Date(date.getTime() + tzOffsetMs + localOffsetMs);
+}
+
 function parseTimestamp(timeString) {
+    if (!timeString || typeof timeString !== 'string') {
+        return null;
+    }
+
     const date = new Date(timeString);
     if (!isNaN(date.getTime())) {
         return date;
@@ -422,14 +495,26 @@ function parseTimestamp(timeString) {
     return null;
 }
 
-function renderTimestamp(timestamp) {
-    if (!timestamp) return '';
-    const parsedTime = parseTimestamp(timestamp);
-    if (!parsedTime) return timestamp;
-    if (timestampRenderingSelect.value === 'relative') {
-        return renderRelativeTimestamp(parsedTime);
+function getTimestampDateFromMatch(matchObj) {
+    if (!matchObj) {
+        return null;
     }
-    return formatAbsoluteTimestamp(parsedTime);
+
+    if (matchObj.groups) {
+        return parseTimestampFromNamedGroups(matchObj.groups);
+    }
+
+    return null;
+}
+
+function renderTimestamp(date) {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+        return '';
+    }
+    if (timestampRenderingSelect.value === 'relative') {
+        return renderRelativeTimestamp(date);
+    }
+    return formatAbsoluteTimestamp(date);
 }
 
 function renderRelativeTimestamp(date) {
@@ -499,14 +584,16 @@ function renderLine(line, matches) {
     let cursor = 0;
 
     for (const matchObj of matches) {
-        const {rule, match, value, start, end} = matchObj;
+        const {rule, value, start, end} = matchObj;
 
         if (rule.xAxisEnabled) {
-            const parsedTimestamp = parseTimestamp(value);
+            const parsedTimestamp = getTimestampDateFromMatch(matchObj);
             if (parsedTimestamp) {
                 timestampDate = parsedTimestamp;
+                timestampText = renderTimestamp(parsedTimestamp);
+            } else if (!timestampText) {
+                timestampText = value;
             }
-            timestampText = renderTimestamp(value) || timestampText;
         }
 
         if (rule.applyWholeLine) {
@@ -543,15 +630,77 @@ function escapeAttribute(value) {
     return escapeHtml(value).replace(/"/g, '&quot;');
 }
 
-function renderFrequencyGraph(lines, rules) {
+function getTimestampElements() {
+    return Array.from(logContainer.querySelectorAll('.timestamp[data-timestamp]'));
+}
+
+function getTimestampDateFromElement(element) {
+    const rawValue = element && element.dataset ? element.dataset.timestamp : '';
+    if (!rawValue) {
+        return null;
+    }
+
+    return parseTimestamp(rawValue);
+}
+
+function cancelScheduledGraphRender() {
+    if (pendingGraphRenderTimeoutId !== null) {
+        window.clearTimeout(pendingGraphRenderTimeoutId);
+        pendingGraphRenderTimeoutId = null;
+    }
+}
+
+function scrollLogToTimeRange(rangeStart, rangeEnd) {
+    const timestamps = getTimestampElements();
+    if (!timestamps.length) {
+        return;
+    }
+
+    let fallbackElement = null;
+    let fallbackDelta = Number.POSITIVE_INFINITY;
+
+    for (const timestampElement of timestamps) {
+        const timestampDate = getTimestampDateFromElement(timestampElement);
+        if (!timestampDate) {
+            continue;
+        }
+
+        const timeValue = timestampDate.getTime();
+        if (timeValue >= rangeStart.getTime() && timeValue < rangeEnd.getTime()) {
+            const lineElement = timestampElement.closest('.log-line');
+            if (lineElement) {
+                lineElement.scrollIntoView({behavior: 'smooth', block: 'center'});
+            }
+            return;
+        }
+
+        const rangeDelta = timeValue < rangeStart.getTime()
+            ? rangeStart.getTime() - timeValue
+            : timeValue - rangeEnd.getTime();
+        if (rangeDelta < fallbackDelta) {
+            fallbackDelta = rangeDelta;
+            fallbackElement = timestampElement;
+        }
+    }
+
+    if (fallbackElement) {
+        const lineElement = fallbackElement.closest('.log-line');
+        if (lineElement) {
+            lineElement.scrollIntoView({behavior: 'smooth', block: 'center'});
+        }
+    }
+}
+
+function renderFrequencyGraph(lineEntries, rules) {
     const timestampRule = getTimestampSourceRule(rules);
     if (!timestampRule) {
+        cancelScheduledGraphRender();
         frequencyGraphPanel.classList.add('d-none');
         frequencyGraph.innerHTML = '';
         return;
     }
 
-    const graphData = buildFrequencyGraphData(lines, rules, timestampRule);
+    const graphData = buildFrequencyGraphData(lineEntries, rules);
     if (!graphData) {
         frequencyGraphPanel.classList.add('d-none');
         frequencyGraph.innerHTML = '';
@@ -562,28 +711,40 @@ function renderFrequencyGraph(lines, rules) {
     frequencyGraphPanel.classList.remove('d-none');
 }
 
-function buildFrequencyGraphData(lines, rules, timestampRule) {
-    const entries = [];
-    for (const line of lines) {
-        const timestampMatch = timestampRule.regex.exec(line);
-        timestampRule.regex.lastIndex = 0;
-        if (!timestampMatch) {
-            continue;
-        }
+function scheduleFrequencyGraphRender(lineEntries, rules) {
+    cancelScheduledGraphRender();
 
-        const timestampValue = timestampMatch[1] || timestampMatch[0];
-        const timestamp = parseTimestamp(timestampValue);
+    const delay = getGraphUpdateDelayMs();
+    if (delay <= 0) {
+        renderFrequencyGraph(lineEntries, rules);
+        return;
+    }
+
+    pendingGraphRenderTimeoutId = window.setTimeout(() => {
+        pendingGraphRenderTimeoutId = null;
+        renderFrequencyGraph(lineEntries, rules);
+    }, delay);
+}
+
+function buildFrequencyGraphData(lineEntries, rules) {
+    const entries = [];
+    for (const lineEntry of lineEntries) {
+        const timestampMatch = getTimestampMatch(lineEntry.matches);
+        const timestamp = getTimestampDateFromMatch(timestampMatch);
         if (!timestamp) {
             continue;
         }
 
-        entries.push({line, timestamp});
+        entries.push({
+            line: lineEntry.line,
+            timestamp,
+            matches: lineEntry.matches
+        });
     }
 
     if (!entries.length) {
         return null;
     }
-
     entries.sort((left, right) => left.timestamp - right.timestamp);
     const bucketSize = getFrequencyBucketSize(
         entries[0].timestamp,
@@ -610,9 +771,8 @@ function buildFrequencyGraphData(lines, rules, timestampRule) {
         );
 
         for (const seriesItem of series) {
-            const match = seriesItem.rule.regex.exec(entry.line);
-            seriesItem.rule.regex.lastIndex = 0;
-            if (!match) {
+            const hasMatch = entry.matches.some((matchObj) => matchObj.rule === seriesItem.rule);
+            if (!hasMatch) {
                 continue;
             }
 
@@ -639,6 +799,102 @@ function getFrequencyBucketSize(startDate, endDate, targetBins) {
     const spanMilliseconds = Math.max(1, endDate.getTime() - startDate.getTime());
     const safeTargetBins = Math.max(1, targetBins);
     return Math.max(1, Math.ceil(spanMilliseconds / safeTargetBins));
+}
+
+function getFrequencyXAxisConfig(d3, startDate, endDate, innerWidth) {
+    const spanMilliseconds = Math.max(1, endDate.getTime() - startDate.getTime());
+    const targetTickCount = Math.max(2, Math.min(10, Math.floor(innerWidth / 90)));
+    const targetStepMilliseconds = Math.ceil(spanMilliseconds / targetTickCount);
+    const tickOptions = [
+        {
+            stepMilliseconds: 1000,
+            interval: () => d3.timeSecond.every(1),
+            format: d3.timeFormat('%H:%M:%S')
+        },
+        {
+            stepMilliseconds: 5000,
+            interval: () => d3.timeSecond.every(5),
+            format: d3.timeFormat('%H:%M:%S')
+        },
+        {
+            stepMilliseconds: 15000,
+            interval: () => d3.timeSecond.every(15),
+            format: d3.timeFormat('%H:%M:%S')
+        },
+        {
+            stepMilliseconds: 30000,
+            interval: () => d3.timeSecond.every(30),
+            format: d3.timeFormat('%H:%M:%S')
+        },
+        {
+            stepMilliseconds: 60000,
+            interval: () => d3.timeMinute.every(1),
+            format: d3.timeFormat('%H:%M')
+        },
+        {
+            stepMilliseconds: 300000,
+            interval: () => d3.timeMinute.every(5),
+            format: d3.timeFormat('%H:%M')
+        },
+        {
+            stepMilliseconds: 900000,
+            interval: () => d3.timeMinute.every(15),
+            format: d3.timeFormat('%H:%M')
+        },
+        {
+            stepMilliseconds: 1800000,
+            interval: () => d3.timeMinute.every(30),
+            format: d3.timeFormat('%H:%M')
+        },
+        {
+            stepMilliseconds: 3600000,
+            interval: () => d3.timeHour.every(1),
+            format: d3.timeFormat('%H:%M')
+        },
+        {
+            stepMilliseconds: 21600000,
+            interval: () => d3.timeHour.every(6),
+            format: d3.timeFormat('%m-%d %H:%M')
+        },
+        {
+            stepMilliseconds: 43200000,
+            interval: () => d3.timeHour.every(12),
+            format: d3.timeFormat('%m-%d %H:%M')
+        },
+        {
+            stepMilliseconds: 86400000,
+            interval: () => d3.timeDay.every(1),
+            format: d3.timeFormat('%Y-%m-%d')
+        },
+        {
+            stepMilliseconds: 604800000,
+            interval: () => d3.timeWeek.every(1),
+            format: d3.timeFormat('%Y-%m-%d')
+        },
+        {
+            stepMilliseconds: 2678400000,
+            interval: () => d3.timeMonth.every(1),
+            format: d3.timeFormat('%Y-%m')
+        },
+        {
+            stepMilliseconds: 7776000000,
+            interval: () => d3.timeMonth.every(3),
+            format: d3.timeFormat('%Y-%m')
+        },
+        {
+            stepMilliseconds: 31536000000,
+            interval: () => d3.timeYear.every(1),
+            format: d3.timeFormat('%Y')
+        }
+    ];
+
+    const selectedOption = tickOptions.find((option) => option.stepMilliseconds >= targetStepMilliseconds)
+        || tickOptions[tickOptions.length - 1];
+
+    return {
+        interval: selectedOption.interval(),
+        format: selectedOption.format
+    };
 }
 
 function drawFrequencyGraph(graphData) {
@@ -679,6 +935,7 @@ function drawFrequencyGraph(graphData) {
         .domain([0, Math.max(1, graphData.maxCount)])
         .nice()
         .range([innerHeight, 0]);
+    const xAxisConfig = getFrequencyXAxisConfig(d3, chartStart, chartEnd, innerWidth);
 
     chart.append('g')
         .attr('class', 'frequency-graph-grid')
@@ -708,11 +965,32 @@ function drawFrequencyGraph(graphData) {
     chart.append('g')
         .attr('class', 'frequency-graph-axis')
         .attr('transform', `translate(0,${innerHeight})`)
-        .call(d3.axisBottom(xScale).ticks(Math.min(6, graphData.bucketCount)).tickFormat(d3.timeFormat('%H:%M')));
+        .call(d3.axisBottom(xScale).ticks(xAxisConfig.interval).tickFormat(xAxisConfig.format));
 
     chart.append('g')
         .attr('class', 'frequency-graph-axis')
         .call(d3.axisLeft(yScale).ticks(4).tickFormat(d3.format('d')));
+
+    chart.append('rect')
+        .attr('class', 'frequency-graph-hit-area')
+        .attr('x', 0)
+        .attr('y', 0)
+        .attr('width', innerWidth)
+        .attr('height', innerHeight)
+        .attr('fill', 'transparent')
+        .style('cursor', 'pointer')
+        .on('click', function (event) {
+            const [x] = d3.pointer(event, this);
+            const clickedTime = xScale.invert(Math.max(0, Math.min(innerWidth, x)));
+            const elapsedMilliseconds = clickedTime.getTime() - graphData.bucketStart.getTime();
+            const bucketIndex = Math.min(
+                graphData.bucketCount - 1,
+                Math.max(0, Math.floor(elapsedMilliseconds / graphData.bucketSize))
+            );
+            const bucketStart = new Date(graphData.bucketStart.getTime() + (bucketIndex * graphData.bucketSize));
+            const bucketEnd = new Date(bucketStart.getTime() + graphData.bucketSize);
+            scrollLogToTimeRange(bucketStart, bucketEnd);
+        });
 
     const legend = document.createElement('div');
     legend.className = 'frequency-graph-legend';
@@ -727,12 +1005,17 @@ function drawFrequencyGraph(graphData) {
 
 function renderLog(lines) {
     const rules = getPatternRules();
+    const lineEntries = lines.map((line) => ({
+        line,
+        matches: getPatternMatch(line, rules)
+    }));
+    currentPatternRules = rules;
+    currentLineEntries = lineEntries;
     // logContainer.classList.toggle('show-axis', xAxisToggle.checked);
 
-    const renderedLines = lines.map((line) => {
-        const matchedPattern = getPatternMatch(line, rules);
-        if (matchedPattern.length) {
-            return renderLine(line, matchedPattern);
+    const renderedLines = lineEntries.map(({line, matches}) => {
+        if (matches.length) {
+            return renderLine(line, matches);
         }
         return renderLine(line, []);
 
@@ -753,7 +1036,7 @@ function renderLog(lines) {
     if (timestampRenderingSelect.value === 'delta') {
         applyDeltaTimestamps();
     }
-    renderFrequencyGraph(lines, rules);
+    scheduleFrequencyGraphRender(lineEntries, rules);
 }
 
 function applyDeltaTimestamps() {
@@ -847,6 +1130,9 @@ function loadDefaultLogFile() {
 function clearLog() {
     currentNavigator = null;
     currentLines = [];
+    currentLineEntries = [];
+    currentPatternRules = [];
+    cancelScheduledGraphRender();
     logContainer.innerHTML = '';
     logContainer.classList.remove('show-axis');
     frequencyGraphPanel.classList.add('d-none');
@@ -899,6 +1185,16 @@ timestampRenderingSelect.addEventListener('change', refreshLogFromPatternControl
 frequencyBinCountInput.addEventListener('change', refreshLogFromPatternControls);
 frequencyBinCountInput.addEventListener('blur', () => {
     frequencyBinCountInput.value = getFrequencyBinCount();
+});
+graphUpdateDelayInput.addEventListener('change', () => {
+    graphUpdateDelayInput.value = getGraphUpdateDelayMs();
+    savePatternSettings();
+    if (currentLineEntries.length) {
+        scheduleFrequencyGraphRender(currentLineEntries, currentPatternRules);
+    }
+});
+graphUpdateDelayInput.addEventListener('blur', () => {
+    graphUpdateDelayInput.value = getGraphUpdateDelayMs();
 });
 
 restorePatternSettings();

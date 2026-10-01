@@ -7,15 +7,17 @@ const patternList = document.getElementById('pattern-list');
 const addPatternButton = document.getElementById('add-pattern');
 const exportPatternsButton = document.getElementById('export-patterns');
 const importPatternsInput = document.getElementById('import-patterns');
-const xAxisToggle = document.getElementById('x-axis');
-const highlightToggle = document.getElementById('highlight-style');
+// const xAxisToggle = document.getElementById('x-axis');
+// const highlightToggle = document.getElementById('highlight-style');
 const timestampRenderingSelect = document.getElementById('timestamp-rendering');
 const frequencyGraphPanel = document.getElementById('frequency-graph-panel');
 const frequencyGraph = document.getElementById('frequency-graph');
+const frequencyBinCountInput = document.getElementById('frequency-bin-count');
 const DEFAULT_PATTERN_SETTINGS = {
     xAxisEnabled: false,
     highlightEnabled: false,
     timestampRendering: 'absolute',
+    frequencyBinCount: 24,
     patterns: [
         {
             pattern: '^(\\d{4}-\\d{2}-\\d{2}[\\sT]\\d{2}:\\d{2}:\\d{2}\\.?\\d*\\+\\d{2}?\\:\\d{2}?)',
@@ -35,7 +37,8 @@ const DEFAULT_PATTERN_SETTINGS = {
         }
     ]
 };
-const PATTERN_SETTINGS_STORAGE_KEY = 'log-viewer.pattern-settings';
+const VIEWER_SETTINGS_STORAGE_KEY = 'log-viewer.settings';
+const LEGACY_PATTERN_SETTINGS_STORAGE_KEY = 'log-viewer.pattern-settings';
 
 let currentNavigator = null;
 let currentLines = [];
@@ -127,7 +130,7 @@ function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLin
     styleSelect.value = styleValue;
     lineToggle.checked = applyWholeLine;
     enabledToggleInput.checked = enabled;
-    xAxisToggleInput.checked = xAxisEnabled;
+    // xAxisToggleInput.checked = xAxisEnabled;
     frequencyToggleInput.checked = includeInFrequency && !xAxisEnabled;
     frequencyToggleInput.disabled = xAxisEnabled;
 
@@ -202,13 +205,17 @@ function getPatternSettings() {
         xAxisEnabled: xAxisToggle.checked,
         highlightEnabled: highlightToggle.checked,
         timestampRendering: timestampRenderingSelect.value,
+        frequencyBinCount: getFrequencyBinCount(),
         patterns
     };
 }
 
 function savePatternSettings() {
     try {
-        localStorage.setItem(PATTERN_SETTINGS_STORAGE_KEY, JSON.stringify(getPatternSettings()));
+        const serializedSettings = JSON.stringify(getPatternSettings());
+        localStorage.setItem(VIEWER_SETTINGS_STORAGE_KEY, serializedSettings);
+        // Keep writing legacy key so older copies of the page can still load the same settings.
+        localStorage.setItem(LEGACY_PATTERN_SETTINGS_STORAGE_KEY, serializedSettings);
     } catch (error) {
         console.warn('Could not save pattern settings:', error.message);
     }
@@ -220,7 +227,7 @@ function downloadPatternSettings() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'log-viewer-patterns.json';
+    anchor.download = 'log-viewer-settings.json';
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -232,8 +239,22 @@ function getDefaultPatternSettings() {
         xAxisEnabled: DEFAULT_PATTERN_SETTINGS.xAxisEnabled,
         highlightEnabled: DEFAULT_PATTERN_SETTINGS.highlightEnabled,
         timestampRendering: DEFAULT_PATTERN_SETTINGS.timestampRendering,
+        frequencyBinCount: DEFAULT_PATTERN_SETTINGS.frequencyBinCount,
         patterns: DEFAULT_PATTERN_SETTINGS.patterns.map((pattern) => ({...pattern}))
     };
+}
+
+function normalizeFrequencyBinCount(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return DEFAULT_PATTERN_SETTINGS.frequencyBinCount;
+    }
+
+    return Math.min(500, Math.max(2, parsed));
+}
+
+function getFrequencyBinCount() {
+    return normalizeFrequencyBinCount(frequencyBinCountInput.value);
 }
 
 function normalizePatternSettings(rawSettings) {
@@ -265,9 +286,8 @@ function normalizePatternSettings(rawSettings) {
         }).filter((pattern) => pattern && pattern.pattern.trim())
         : [];
 
-    if (!patterns.length) {
-        return getDefaultPatternSettings();
-    }
+    const fallbackSettings = getDefaultPatternSettings();
+    const safePatterns = patterns.length ? patterns : fallbackSettings.patterns;
 
     return {
         xAxisEnabled: Boolean(rawSettings.xAxisEnabled),
@@ -275,7 +295,8 @@ function normalizePatternSettings(rawSettings) {
         timestampRendering: isValidTimestampRendering(rawSettings.timestampRendering)
             ? rawSettings.timestampRendering
             : DEFAULT_PATTERN_SETTINGS.timestampRendering,
-        patterns
+        frequencyBinCount: normalizeFrequencyBinCount(rawSettings.frequencyBinCount),
+        patterns: safePatterns
     };
 }
 
@@ -300,18 +321,20 @@ function applyPatternSettings(settings) {
         );
     }
 
-    xAxisToggle.checked = safeSettings.xAxisEnabled;
-    highlightToggle.checked = safeSettings.highlightEnabled;
+    // xAxisToggle.checked = safeSettings.xAxisEnabled;
+    // highlightToggle.checked = safeSettings.highlightEnabled;
     timestampRenderingSelect.value = isValidTimestampRendering(safeSettings.timestampRendering)
         ? safeSettings.timestampRendering
         : DEFAULT_PATTERN_SETTINGS.timestampRendering;
+    frequencyBinCountInput.value = normalizeFrequencyBinCount(safeSettings.frequencyBinCount);
 }
 
 function restorePatternSettings() {
     let restoredSettings = null;
 
     try {
-        const rawSettings = localStorage.getItem(PATTERN_SETTINGS_STORAGE_KEY);
+        const rawSettings = localStorage.getItem(VIEWER_SETTINGS_STORAGE_KEY)
+            || localStorage.getItem(LEGACY_PATTERN_SETTINGS_STORAGE_KEY);
         if (rawSettings) {
             restoredSettings = normalizePatternSettings(JSON.parse(rawSettings));
         }
@@ -562,7 +585,11 @@ function buildFrequencyGraphData(lines, rules, timestampRule) {
     }
 
     entries.sort((left, right) => left.timestamp - right.timestamp);
-    const bucketSize = getFrequencyBucketSize(entries[0].timestamp, entries[entries.length - 1].timestamp);
+    const bucketSize = getFrequencyBucketSize(
+        entries[0].timestamp,
+        entries[entries.length - 1].timestamp,
+        getFrequencyBinCount()
+    );
     const bucketCount = Math.max(1, Math.floor((entries[entries.length - 1].timestamp - entries[0].timestamp) / bucketSize) + 1);
     const series = rules.filter((rule) => rule.includeInFrequency).map((rule) => ({
         rule,
@@ -608,26 +635,10 @@ function buildFrequencyGraphData(lines, rules, timestampRule) {
     };
 }
 
-function getFrequencyBucketSize(startDate, endDate) {
+function getFrequencyBucketSize(startDate, endDate, targetBins) {
     const spanMilliseconds = Math.max(1, endDate.getTime() - startDate.getTime());
-    const targetBuckets = 24;
-    const rawBucketSize = Math.ceil(spanMilliseconds / targetBuckets);
-    const bucketSizes = [
-        1000,
-        5000,
-        15000,
-        30000,
-        60000,
-        300000,
-        900000,
-        1800000,
-        3600000,
-        21600000,
-        43200000,
-        86400000
-    ];
-
-    return bucketSizes.find((size) => size >= rawBucketSize) || bucketSizes[bucketSizes.length - 1];
+    const safeTargetBins = Math.max(1, targetBins);
+    return Math.max(1, Math.ceil(spanMilliseconds / safeTargetBins));
 }
 
 function drawFrequencyGraph(graphData) {
@@ -646,6 +657,10 @@ function drawFrequencyGraph(graphData) {
     const bucketDates = Array.from({length: graphData.bucketCount}, (_, index) => (
         new Date(graphData.bucketStart.getTime() + (index * graphData.bucketSize))
     ));
+    const chartStart = bucketDates[0];
+    const chartEnd = new Date(
+        graphData.bucketStart.getTime() + (graphData.bucketCount * graphData.bucketSize)
+    );
 
     frequencyGraph.innerHTML = '';
     const svg = d3.select(frequencyGraph)
@@ -658,7 +673,7 @@ function drawFrequencyGraph(graphData) {
         .attr('transform', `translate(${margin.left},${margin.top})`);
 
     const xScale = d3.scaleTime()
-        .domain(d3.extent(bucketDates))
+        .domain([chartStart, chartEnd])
         .range([0, innerWidth]);
     const yScale = d3.scaleLinear()
         .domain([0, Math.max(1, graphData.maxCount)])
@@ -670,12 +685,21 @@ function drawFrequencyGraph(graphData) {
         .call(d3.axisLeft(yScale).ticks(4).tickSize(-innerWidth).tickFormat(() => ''));
 
     graphData.series.forEach((series, index) => {
+        const stepPoints = [];
+        series.buckets.forEach((value, bucketIndex) => {
+            const start = new Date(graphData.bucketStart.getTime() + (bucketIndex * graphData.bucketSize));
+            const end = new Date(start.getTime() + graphData.bucketSize);
+            // Duplicate each bucket value at its start/end to create square segments.
+            stepPoints.push({time: start, value});
+            stepPoints.push({time: end, value});
+        });
+
         const line = d3.line()
-            .x((_, bucketIndex) => xScale(bucketDates[bucketIndex]))
-            .y((value) => yScale(value));
+            .x((point) => xScale(point.time))
+            .y((point) => yScale(point.value));
 
         chart.append('path')
-            .datum(series.buckets)
+            .datum(stepPoints)
             .attr('class', 'frequency-graph-line')
             .attr('stroke', colors[index % colors.length])
             .attr('d', line);
@@ -703,7 +727,7 @@ function drawFrequencyGraph(graphData) {
 
 function renderLog(lines) {
     const rules = getPatternRules();
-    logContainer.classList.toggle('show-axis', xAxisToggle.checked);
+    // logContainer.classList.toggle('show-axis', xAxisToggle.checked);
 
     const renderedLines = lines.map((line) => {
         const matchedPattern = getPatternMatch(line, rules);
@@ -866,12 +890,16 @@ fileInput.addEventListener('change', function (event) {
 clearButton.addEventListener('click', clearLog);
 loadButton.addEventListener('click', loadSelectedFile);
 saveButton.addEventListener('click', saveLog);
-xAxisToggle.addEventListener('change', () => {
-    logContainer.classList.toggle('show-axis', xAxisToggle.checked);
-    refreshLogFromPatternControls();
-});
-highlightToggle.addEventListener('change', refreshLogFromPatternControls);
+// xAxisToggle.addEventListener('change', () => {
+//     logContainer.classList.toggle('show-axis', xAxisToggle.checked);
+//     refreshLogFromPatternControls();
+// });
+// highlightToggle.addEventListener('change', refreshLogFromPatternControls);
 timestampRenderingSelect.addEventListener('change', refreshLogFromPatternControls);
+frequencyBinCountInput.addEventListener('change', refreshLogFromPatternControls);
+frequencyBinCountInput.addEventListener('blur', () => {
+    frequencyBinCountInput.value = getFrequencyBinCount();
+});
 
 restorePatternSettings();
 loadDefaultLogFile();

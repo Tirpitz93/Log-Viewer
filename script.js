@@ -441,46 +441,309 @@ function getTimestampMatch(matches) {
 //     return 'normal';
 // }
 
+const MONTH_NAMES = {
+    jan: 0, january: 0,
+    feb: 1, february: 1,
+    mar: 2, march: 2,
+    apr: 3, april: 3,
+    may: 4,
+    jun: 5, june: 5,
+    jul: 6, july: 6,
+    aug: 7, august: 7,
+    sep: 8, sept: 8, september: 8,
+    oct: 9, october: 9,
+    nov: 10, november: 10,
+    dec: 11, december: 11
+};
+
+function parseEpochString(str, type = null) {
+    if (!str || typeof str !== 'string') {
+        return null;
+    }
+    const raw = str.trim();
+    if (!/^-?\d+$/.test(raw)) {
+        return null;
+    }
+
+    try {
+        if (type === 'filetime' || type === 'ntfs') {
+            const bigVal = BigInt(raw);
+            const epochMs = Number((bigVal - 116444736000000000n) / 10000n);
+            const d = new Date(epochMs);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (type === 'ntp') {
+            const num = Number(raw);
+            const epochMs = (num - 2208988800) * 1000;
+            const d = new Date(epochMs);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (type === 'hfs' || type === 'mac') {
+            const num = Number(raw);
+            const epochMs = (num - 2082844800) * 1000;
+            const d = new Date(epochMs);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (type === 's') {
+            const num = Number(raw);
+            const d = new Date(num * 1000);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (type === 'ms') {
+            const num = Number(raw);
+            const d = new Date(num);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (type === 'us') {
+            const num = Number(raw);
+            const d = new Date(Math.floor(num / 1000));
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (type === 'ns') {
+            const bigVal = BigInt(raw);
+            const epochMs = Number(bigVal / 1000000n);
+            const d = new Date(epochMs);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        const len = raw.length;
+        if (len >= 17) {
+            if (len === 18 && raw.startsWith('1')) {
+                const bigVal = BigInt(raw);
+                const epochMs = Number((bigVal - 116444736000000000n) / 10000n);
+                const d = new Date(epochMs);
+                if (!isNaN(d.getTime())) return d;
+            }
+            if (len === 19) {
+                const bigVal = BigInt(raw);
+                const epochMs = Number(bigVal / 1000000n);
+                const d = new Date(epochMs);
+                if (!isNaN(d.getTime())) return d;
+            }
+            const bigVal = BigInt(raw);
+            const epochMs = Number((bigVal - 116444736000000000n) / 10000n);
+            const d = new Date(epochMs);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (len === 15 || len === 16) {
+            const num = Number(raw);
+            const d = new Date(Math.floor(num / 1000));
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (len === 14) {
+            const y = Number.parseInt(raw.slice(0, 4), 10);
+            const m = Number.parseInt(raw.slice(4, 6), 10) - 1;
+            const day = Number.parseInt(raw.slice(6, 8), 10);
+            const h = Number.parseInt(raw.slice(8, 10), 10);
+            const min = Number.parseInt(raw.slice(10, 12), 10);
+            const s = Number.parseInt(raw.slice(12, 14), 10);
+            if (y >= 1970 && m >= 0 && m <= 11 && day >= 1 && day <= 31 && h <= 23 && min <= 59 && s <= 59) {
+                const d = new Date(y, m, day, h, min, s);
+                if (!isNaN(d.getTime())) return d;
+            }
+        }
+
+        if (len === 12 || len === 13) {
+            const num = Number(raw);
+            const d = new Date(num);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        if (len >= 9 && len <= 11) {
+            const num = Number(raw);
+            if (num >= 3000000000) {
+                const epochMs = (num - 2208988800) * 1000;
+                const d = new Date(epochMs);
+                if (!isNaN(d.getTime())) return d;
+            }
+            const d = new Date(num * 1000);
+            return isNaN(d.getTime()) ? null : d;
+        }
+    } catch (_) {}
+    return null;
+}
+
 function parseTimestampFromNamedGroups(groups) {
     if (!groups || typeof groups !== 'object') {
         return null;
     }
 
-    const {year, month, day, hour, minute, second, ms, tz} = groups;
-    if (!year || !month || !day || !hour || !minute || !second) {
+    const wftVal = groups.windowsfiletime || groups.windows_filetime || groups.windows_file_time ||
+        groups.winfiletime || groups.win_filetime || groups.win_file_time ||
+        groups.filetime || groups.file_time || groups.wft || groups.ntfs || groups.ntfs_time;
+    if (wftVal) {
+        const d = parseEpochString(wftVal, 'filetime');
+        if (d) return d;
+    }
+
+    const ntpVal = groups.ntp || groups.ntp_epoch || groups.epoch_ntp || groups.ntp_time;
+    if (ntpVal) {
+        const d = parseEpochString(ntpVal, 'ntp');
+        if (d) return d;
+    }
+
+    const hfsVal = groups.hfs || groups.hfsplus || groups.hfs_plus || groups.hfs_epoch || groups.epoch_hfs ||
+        groups.mac || groups.mac_epoch || groups.mac_time || groups.machfs;
+    if (hfsVal) {
+        const d = parseEpochString(hfsVal, 'hfs');
+        if (d) return d;
+    }
+
+    const nsVal = groups.epoch_ns || groups.epoch_nanos || groups.epoch_nanosecond || groups.epoch_nanoseconds ||
+        groups.epochNs || groups.epochNanos || groups.epochNanoseconds ||
+        groups.unix_ns || groups.unix_nanos || groups.unix_nanoseconds ||
+        groups.unixNs || groups.unixNanos || groups.unixNanoseconds ||
+        groups.timestamp_ns;
+    if (nsVal) {
+        const d = parseEpochString(nsVal, 'ns');
+        if (d) return d;
+    }
+
+    const usVal = groups.epoch_us || groups.epoch_micro || groups.epoch_micros || groups.epoch_microsecond || groups.epoch_microseconds ||
+        groups.epochUs || groups.epochMicro || groups.epochMicros || groups.epochMicroseconds ||
+        groups.unix_us || groups.unix_micro || groups.unix_micros || groups.unix_microseconds ||
+        groups.unixUs || groups.unixMicro || groups.unixMicros || groups.unixMicroseconds ||
+        groups.timestamp_us;
+    if (usVal) {
+        const d = parseEpochString(usVal, 'us');
+        if (d) return d;
+    }
+
+    const msEpochVal = groups.epoch_ms || groups.epoch_milli || groups.epoch_millis || groups.epoch_millisecond || groups.epoch_milliseconds ||
+        groups.epochMs || groups.epochMilli || groups.epochMillis || groups.epochMilliseconds ||
+        groups.unix_ms || groups.unix_milli || groups.unix_millis || groups.unix_milliseconds ||
+        groups.unixMs || groups.unixMillis || groups.unixMilliseconds ||
+        groups.timestamp_ms;
+    if (msEpochVal) {
+        const d = parseEpochString(msEpochVal, 'ms');
+        if (d) return d;
+    }
+
+    const sEpochVal = groups.epoch_s || groups.epoch_sec || groups.epoch_second || groups.epoch_seconds ||
+        groups.epochSec || groups.epochSecond || groups.epochSeconds ||
+        groups.unix_s || groups.unix_sec || groups.unix_second || groups.unix_seconds ||
+        groups.unixSec || groups.unixSecond || groups.unixSeconds ||
+        groups.timestamp_s;
+    if (sEpochVal) {
+        const d = parseEpochString(sEpochVal, 's');
+        if (d) return d;
+    }
+
+    const mysqlVal = groups.mysql || groups.numeric || groups.compact || groups.pure_numeric || groups.pureNumeric || groups.datetime;
+    if (mysqlVal && /^\d{14}$/.test(mysqlVal.trim())) {
+        const d = parseEpochString(mysqlVal.trim());
+        if (d) return d;
+    }
+
+    const genericEpochVal = groups.epoch || groups.unix || groups.timestamp || groups.raw || groups.val || groups.value;
+    if (genericEpochVal && !groups.year && !groups.month && !groups.day) {
+        const d = parseEpochString(genericEpochVal);
+        if (d) return d;
+    }
+
+    const yearVal = groups.year;
+    const monthVal = groups.month || groups.monthName || groups.month_name || groups.mon;
+    const dayVal = groups.day || groups.dayOfMonth || groups.day_of_month || groups.dom;
+    const hourVal = groups.hour || groups.hours || groups.hr;
+    const minuteVal = groups.minute || groups.minutes || groups.min;
+    const secondVal = groups.second || groups.seconds || groups.sec;
+    const msVal = groups.ms || groups.millisecond || groups.milliseconds || groups.millis ||
+        groups.subsecond || groups.subseconds || groups.fraction || groups.frac;
+    const tzVal = groups.tz || groups.timezone || groups.offset || groups.tzOffset || groups.tz_offset;
+    const ampmVal = groups.ampm || groups.meridiem || groups.period || groups.am_pm || groups.ap;
+
+    if (!yearVal || !monthVal || !dayVal || !hourVal || !minuteVal || secondVal === undefined) {
+        if (genericEpochVal) {
+            const d = parseEpochString(genericEpochVal);
+            if (d) return d;
+        }
         return null;
     }
 
-    const safeYear = Number.parseInt(year, 10);
-    const safeMonth = Number.parseInt(month, 10) - 1;
-    const safeDay = Number.parseInt(day, 10);
-    const safeHour = Number.parseInt(hour, 10);
-    const safeMinute = Number.parseInt(minute, 10);
-    const safeSecond = Number.parseInt(second, 10);
-    const safeMs = ms ? Number.parseInt(ms.slice(0, 3).padEnd(3, '0'), 10) : 0;
+    let safeYear = Number.parseInt(yearVal, 10);
+    if (Number.isNaN(safeYear)) {
+        return null;
+    }
+    if (safeYear < 100) {
+        safeYear = safeYear < 70 ? 2000 + safeYear : 1900 + safeYear;
+    }
 
-    if (Number.isNaN(safeYear) || Number.isNaN(safeMonth) || Number.isNaN(safeDay) ||
-        Number.isNaN(safeHour) || Number.isNaN(safeMinute) || Number.isNaN(safeSecond)) {
+    let safeMonth;
+    const monthStr = String(monthVal).trim().toLowerCase();
+    if (MONTH_NAMES.hasOwnProperty(monthStr)) {
+        safeMonth = MONTH_NAMES[monthStr];
+    } else {
+        safeMonth = Number.parseInt(monthVal, 10) - 1;
+    }
+    if (Number.isNaN(safeMonth) || safeMonth < 0 || safeMonth > 11) {
         return null;
     }
 
-    let date = new Date(safeYear, safeMonth, safeDay, safeHour, safeMinute, safeSecond, safeMs);
-    if (!tz || tz === '') {
-        return date;
+    const safeDay = Number.parseInt(dayVal, 10);
+    if (Number.isNaN(safeDay) || safeDay < 1 || safeDay > 31) {
+        return null;
     }
 
-    const tzMatch = tz.match(/([+-])(\d{2}):?(\d{2})/);
-    if (!tzMatch) {
-        return date;
+    let safeHour = Number.parseInt(hourVal, 10);
+    if (Number.isNaN(safeHour) || safeHour < 0 || safeHour > 23) {
+        return null;
     }
 
-    const tzSign = tzMatch[1] === '+' ? 1 : -1;
-    const tzHours = Number.parseInt(tzMatch[2], 10);
-    const tzMinutes = Number.parseInt(tzMatch[3], 10);
-    const tzOffsetMs = tzSign * (tzHours * 3600000 + tzMinutes * 60000);
-    const localOffsetMs = date.getTimezoneOffset() * 60000;
+    if (ampmVal) {
+        const ap = String(ampmVal).trim().toUpperCase();
+        if (ap.startsWith('P') && safeHour < 12) {
+            safeHour += 12;
+        } else if (ap.startsWith('A') && safeHour === 12) {
+            safeHour = 0;
+        }
+    }
 
-    return new Date(date.getTime() + tzOffsetMs + localOffsetMs);
+    const safeMinute = Number.parseInt(minuteVal, 10);
+    if (Number.isNaN(safeMinute) || safeMinute < 0 || safeMinute > 59) {
+        return null;
+    }
+
+    const safeSecond = Number.parseInt(secondVal, 10);
+    if (Number.isNaN(safeSecond) || safeSecond < 0 || safeSecond > 60) {
+        return null;
+    }
+
+    let safeMs = 0;
+    if (msVal) {
+        const msDigits = String(msVal).replace(/\D/g, '');
+        if (msDigits.length >= 3) {
+            safeMs = Number.parseInt(msDigits.slice(0, 3), 10);
+        } else if (msDigits.length > 0) {
+            safeMs = Number.parseInt(msDigits.padEnd(3, '0'), 10);
+        }
+    }
+
+    if (tzVal && String(tzVal).trim()) {
+        const cleanTz = String(tzVal).trim();
+        const upperTz = cleanTz.toUpperCase();
+        if (upperTz === 'Z' || upperTz === 'UTC' || upperTz === 'GMT') {
+            return new Date(Date.UTC(safeYear, safeMonth, safeDay, safeHour, safeMinute, safeSecond, safeMs));
+        }
+
+        const tzMatch = cleanTz.match(/([+-])(\d{1,2})(?::?(\d{2}))?/);
+        if (tzMatch) {
+            const tzSign = tzMatch[1] === '+' ? 1 : -1;
+            const tzHours = Number.parseInt(tzMatch[2], 10);
+            const tzMinutes = tzMatch[3] ? Number.parseInt(tzMatch[3], 10) : 0;
+            const tzOffsetMs = tzSign * (tzHours * 3600000 + tzMinutes * 60000);
+            return new Date(Date.UTC(safeYear, safeMonth, safeDay, safeHour, safeMinute, safeSecond, safeMs) - tzOffsetMs);
+        }
+    }
+
+    return new Date(safeYear, safeMonth, safeDay, safeHour, safeMinute, safeSecond, safeMs);
 }
 
 function parseTimestamp(timeString) {
@@ -488,7 +751,15 @@ function parseTimestamp(timeString) {
         return null;
     }
 
-    const date = new Date(timeString);
+    const trimmed = timeString.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+        const epochDate = parseEpochString(trimmed);
+        if (epochDate) {
+            return epochDate;
+        }
+    }
+
+    const date = new Date(trimmed);
     if (!isNaN(date.getTime())) {
         return date;
     }
@@ -501,7 +772,14 @@ function getTimestampDateFromMatch(matchObj) {
     }
 
     if (matchObj.groups) {
-        return parseTimestampFromNamedGroups(matchObj.groups);
+        const fromGroups = parseTimestampFromNamedGroups(matchObj.groups);
+        if (fromGroups) {
+            return fromGroups;
+        }
+    }
+
+    if (matchObj.value) {
+        return parseTimestamp(matchObj.value);
     }
 
     return null;

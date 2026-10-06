@@ -1,0 +1,79 @@
+{
+  "timestampRendering": "delta",
+  "graphUpdateDelayMs": 2,
+  "frequencyBinCount": 8,
+  "patterns": [
+    {
+      "pattern": "ERROR",
+      "style": "hidden",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": false
+    },
+    {
+      "pattern": "warning",
+      "style": "warning",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    },
+    {
+      "pattern": "Applying column filters to",
+      "style": "fatal",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    },
+    {
+      "pattern": " Ioctl failed",
+      "style": "debug",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    },
+    {
+      "pattern": "^\\[?((?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[\\sT](?<hour>\\d{2}):(?<minute>\\d{2}):(?<second>\\d{2})(?:[\\.,](?<ms>\\d+))?(?<tz>[+-]\\d{2}:?\\d{2})?Z?)\\]?",
+      "style": "hidden",
+      "applyWholeLine": false,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": false
+    },
+    {
+      "pattern": "widgets.data_reader",
+      "style": "info",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    },
+    {
+      "pattern": "OOB",
+      "style": "error",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    },
+    {
+      "pattern": "Traceback \\(most recent call last\\)\\:",
+      "style": "error",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    },
+    {
+      "pattern": "EXT4-fs",
+      "style": "hidden",
+      "applyWholeLine": true,
+      "enabled": true,
+      "xAxisEnabled": false,
+      "includeInFrequency": true
+    }
+  ]
+}

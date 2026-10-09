@@ -3,6 +3,9 @@ const fileInput = document.getElementById('file');
 const clearButton = document.getElementById('clear');
 const loadButton = document.getElementById('load');
 const saveButton = document.getElementById('save');
+const wrapLinesToggle = document.getElementById('wrap-lines-toggle');
+const compactToggle = document.getElementById('compact-toggle');
+const darkModeToggle = document.getElementById('dark-mode-toggle');
 const patternList = document.getElementById('pattern-list');
 const addPatternButton = document.getElementById('add-pattern');
 const exportPatternsButton = document.getElementById('export-patterns');
@@ -17,6 +20,9 @@ const frequencyBinCountInput = document.getElementById('frequency-bin-count');
 const DEFAULT_PATTERN_SETTINGS = {
     xAxisEnabled: false,
     highlightEnabled: false,
+    wrapLines: true,
+    compactMode: false,
+    darkMode: false,
     timestampRendering: 'absolute',
     graphUpdateDelayMs: 200,
     frequencyBinCount: 24,
@@ -133,17 +139,16 @@ function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLin
     const xAxisToggleInput = row.querySelector('.pattern-x-axis-toggle');
     const frequencyToggleInput = row.querySelector('.pattern-frequency-toggle');
     styleSelect.value = styleValue;
-    lineToggle.checked = applyWholeLine;
-    enabledToggleInput.checked = enabled;
-    // xAxisToggleInput.checked = xAxisEnabled;
-    frequencyToggleInput.checked = includeInFrequency && !xAxisEnabled;
-    frequencyToggleInput.disabled = xAxisEnabled;
+    lineToggle.checked = Boolean(applyWholeLine);
+    enabledToggleInput.checked = Boolean(enabled);
+    xAxisToggleInput.checked = Boolean(xAxisEnabled);
+    frequencyToggleInput.checked = Boolean(includeInFrequency) && !xAxisEnabled;
+    frequencyToggleInput.disabled = Boolean(xAxisEnabled);
 
     row.querySelector('.pattern-input').addEventListener('input', refreshLogFromPatternControls);
     styleSelect.addEventListener('change', refreshLogFromPatternControls);
     lineToggle.addEventListener('change', refreshLogFromPatternControls);
     enabledToggleInput.addEventListener('change', refreshLogFromPatternControls);
-    xAxisToggleInput.addEventListener('change', refreshLogFromPatternControls);
     frequencyToggleInput.addEventListener('change', refreshLogFromPatternControls);
     xAxisToggleInput.addEventListener('change', () => {
         if (xAxisToggleInput.checked) {
@@ -151,10 +156,9 @@ function createPatternRow(patternValue = '', styleValue = 'error', applyWholeLin
             frequencyToggleInput.disabled = true;
         } else {
             frequencyToggleInput.disabled = false;
-            if (!frequencyToggleInput.checked) {
-                frequencyToggleInput.checked = true;
-            }
+            frequencyToggleInput.checked = true;
         }
+        refreshLogFromPatternControls();
     });
     row.querySelector('.remove-pattern').addEventListener('click', () => {
         if (patternList.querySelectorAll('.pattern-row').length > 1) {
@@ -209,6 +213,9 @@ function getPatternSettings() {
     return {
         // xAxisEnabled: xAxisToggle.checked,
         // highlightEnabled: highlightToggle.checked,
+        wrapLines: wrapLinesToggle ? wrapLinesToggle.checked : true,
+        compactMode: compactToggle ? compactToggle.checked : false,
+        darkMode: darkModeToggle ? darkModeToggle.checked : false,
         timestampRendering: timestampRenderingSelect.value,
         graphUpdateDelayMs: getGraphUpdateDelayMs(),
         frequencyBinCount: getFrequencyBinCount(),
@@ -244,6 +251,9 @@ function getDefaultPatternSettings() {
     return {
         xAxisEnabled: DEFAULT_PATTERN_SETTINGS.xAxisEnabled,
         highlightEnabled: DEFAULT_PATTERN_SETTINGS.highlightEnabled,
+        wrapLines: DEFAULT_PATTERN_SETTINGS.wrapLines,
+        compactMode: DEFAULT_PATTERN_SETTINGS.compactMode,
+        darkMode: DEFAULT_PATTERN_SETTINGS.darkMode,
         timestampRendering: DEFAULT_PATTERN_SETTINGS.timestampRendering,
         graphUpdateDelayMs: DEFAULT_PATTERN_SETTINGS.graphUpdateDelayMs,
         frequencyBinCount: DEFAULT_PATTERN_SETTINGS.frequencyBinCount,
@@ -312,6 +322,9 @@ function normalizePatternSettings(rawSettings) {
     return {
         xAxisEnabled: Boolean(rawSettings.xAxisEnabled),
         highlightEnabled: Boolean(rawSettings.highlightEnabled),
+        wrapLines: rawSettings.wrapLines !== false,
+        compactMode: Boolean(rawSettings.compactMode),
+        darkMode: Boolean(rawSettings.darkMode),
         timestampRendering: isValidTimestampRendering(rawSettings.timestampRendering)
             ? rawSettings.timestampRendering
             : DEFAULT_PATTERN_SETTINGS.timestampRendering,
@@ -323,6 +336,28 @@ function normalizePatternSettings(rawSettings) {
 
 function isValidTimestampRendering(value) {
     return value === 'absolute' || value === 'relative' || value === 'delta';
+}
+
+function setWrapLines(enabled) {
+    if (wrapLinesToggle) {
+        wrapLinesToggle.checked = Boolean(enabled);
+    }
+    logContainer.classList.toggle('no-wrap', !enabled);
+}
+
+function setCompactMode(enabled) {
+    if (compactToggle) {
+        compactToggle.checked = Boolean(enabled);
+    }
+    document.body.classList.toggle('compact-mode', Boolean(enabled));
+}
+
+function setDarkMode(enabled) {
+    if (darkModeToggle) {
+        darkModeToggle.checked = Boolean(enabled);
+    }
+    document.body.classList.toggle('dark-mode', Boolean(enabled));
+    document.documentElement.setAttribute('data-bs-theme', enabled ? 'dark' : 'light');
 }
 
 function applyPatternSettings(settings) {
@@ -344,6 +379,9 @@ function applyPatternSettings(settings) {
 
     // xAxisToggle.checked = safeSettings.xAxisEnabled;
     // highlightToggle.checked = safeSettings.highlightEnabled;
+    setWrapLines(safeSettings.wrapLines);
+    setCompactMode(safeSettings.compactMode);
+    setDarkMode(safeSettings.darkMode);
     timestampRenderingSelect.value = isValidTimestampRendering(safeSettings.timestampRendering)
         ? safeSettings.timestampRendering
         : DEFAULT_PATTERN_SETTINGS.timestampRendering;
@@ -928,6 +966,40 @@ function cancelScheduledGraphRender() {
     }
 }
 
+function scrollLogToTimestamp(targetTime) {
+    const timestamps = getTimestampElements();
+    if (!timestamps.length) {
+        return;
+    }
+
+    const targetTimeMs = targetTime instanceof Date ? targetTime.getTime() : Number(targetTime);
+    let closestElement = null;
+    let closestDelta = Number.POSITIVE_INFINITY;
+
+    for (const timestampElement of timestamps) {
+        const timestampDate = getTimestampDateFromElement(timestampElement);
+        if (!timestampDate) {
+            continue;
+        }
+
+        const delta = Math.abs(timestampDate.getTime() - targetTimeMs);
+        if (delta < closestDelta) {
+            closestDelta = delta;
+            closestElement = timestampElement;
+            if (delta === 0) {
+                break;
+            }
+        }
+    }
+
+    if (closestElement) {
+        const lineElement = closestElement.closest('.log-line');
+        if (lineElement) {
+            lineElement.scrollIntoView({behavior: 'smooth', block: 'center'});
+        }
+    }
+}
+
 function scrollLogToTimeRange(rangeStart, rangeEnd) {
     const timestamps = getTimestampElements();
     if (!timestamps.length) {
@@ -985,8 +1057,8 @@ function renderFrequencyGraph(lineEntries, rules) {
         return;
     }
 
-    drawFrequencyGraph(graphData);
     frequencyGraphPanel.classList.remove('d-none');
+    drawFrequencyGraph(graphData);
 }
 
 function scheduleFrequencyGraphRender(lineEntries, rules) {
@@ -1182,11 +1254,13 @@ function drawFrequencyGraph(graphData) {
     }
 
     const d3 = window.d3;
-    const width = Math.max(280, frequencyGraph.clientWidth || 280);
-    const height = 240;
+    const isCompact = document.body.classList.contains('compact-mode');
+    const measuredWidth = frequencyGraph.clientWidth || (frequencyGraph.getBoundingClientRect && frequencyGraph.getBoundingClientRect().width) || 0;
+    const width = Math.max(100, Math.floor(measuredWidth) || 280);
+    const height = isCompact ? 150 : 240;
     const margin = {top: 12, right: 16, bottom: 36, left: 36};
-    const innerWidth = width - margin.left - margin.right;
-    const innerHeight = height - margin.top - margin.bottom;
+    const innerWidth = Math.max(10, width - margin.left - margin.right);
+    const innerHeight = Math.max(10, height - margin.top - margin.bottom);
     const colors = d3.schemeTableau10;
     const bucketDates = Array.from({length: graphData.bucketCount}, (_, index) => (
         new Date(graphData.bucketStart.getTime() + (index * graphData.bucketSize))
@@ -1200,6 +1274,8 @@ function drawFrequencyGraph(graphData) {
     const svg = d3.select(frequencyGraph)
         .append('svg')
         .attr('viewBox', `0 0 ${width} ${height}`)
+        .attr('width', '100%')
+        .attr('height', height)
         .attr('role', 'img')
         .attr('aria-label', 'Frequency over time chart');
 
@@ -1260,14 +1336,7 @@ function drawFrequencyGraph(graphData) {
         .on('click', function (event) {
             const [x] = d3.pointer(event, this);
             const clickedTime = xScale.invert(Math.max(0, Math.min(innerWidth, x)));
-            const elapsedMilliseconds = clickedTime.getTime() - graphData.bucketStart.getTime();
-            const bucketIndex = Math.min(
-                graphData.bucketCount - 1,
-                Math.max(0, Math.floor(elapsedMilliseconds / graphData.bucketSize))
-            );
-            const bucketStart = new Date(graphData.bucketStart.getTime() + (bucketIndex * graphData.bucketSize));
-            const bucketEnd = new Date(bucketStart.getTime() + graphData.bucketSize);
-            scrollLogToTimeRange(bucketStart, bucketEnd);
+            scrollLogToTimestamp(clickedTime);
         });
 
     const legend = document.createElement('div');
@@ -1454,15 +1523,49 @@ fileInput.addEventListener('change', function (event) {
 clearButton.addEventListener('click', clearLog);
 loadButton.addEventListener('click', loadSelectedFile);
 saveButton.addEventListener('click', saveLog);
+if (wrapLinesToggle) {
+    wrapLinesToggle.addEventListener('change', () => {
+        setWrapLines(wrapLinesToggle.checked);
+        savePatternSettings();
+    });
+}
+if (compactToggle) {
+    compactToggle.addEventListener('change', () => {
+        setCompactMode(compactToggle.checked);
+        savePatternSettings();
+        if (currentLineEntries.length) {
+            renderFrequencyGraph(currentLineEntries, currentPatternRules);
+        }
+    });
+}
+if (darkModeToggle) {
+    darkModeToggle.addEventListener('change', () => {
+        setDarkMode(darkModeToggle.checked);
+        savePatternSettings();
+        if (currentLineEntries.length) {
+            renderFrequencyGraph(currentLineEntries, currentPatternRules);
+        }
+    });
+}
 // xAxisToggle.addEventListener('change', () => {
 //     logContainer.classList.toggle('show-axis', xAxisToggle.checked);
 //     refreshLogFromPatternControls();
 // });
 // highlightToggle.addEventListener('change', refreshLogFromPatternControls);
 timestampRenderingSelect.addEventListener('change', refreshLogFromPatternControls);
-frequencyBinCountInput.addEventListener('change', refreshLogFromPatternControls);
+frequencyBinCountInput.addEventListener('change', () => {
+    frequencyBinCountInput.value = getFrequencyBinCount();
+    refreshLogFromPatternControls();
+});
+frequencyBinCountInput.addEventListener('input', () => {
+    savePatternSettings();
+    if (currentLineEntries.length) {
+        scheduleFrequencyGraphRender(currentLineEntries, currentPatternRules);
+    }
+});
 frequencyBinCountInput.addEventListener('blur', () => {
     frequencyBinCountInput.value = getFrequencyBinCount();
+    savePatternSettings();
 });
 graphUpdateDelayInput.addEventListener('change', () => {
     graphUpdateDelayInput.value = getGraphUpdateDelayMs();
@@ -1471,9 +1574,35 @@ graphUpdateDelayInput.addEventListener('change', () => {
         scheduleFrequencyGraphRender(currentLineEntries, currentPatternRules);
     }
 });
+graphUpdateDelayInput.addEventListener('input', () => {
+    savePatternSettings();
+});
 graphUpdateDelayInput.addEventListener('blur', () => {
     graphUpdateDelayInput.value = getGraphUpdateDelayMs();
+    savePatternSettings();
 });
+
+window.addEventListener('resize', () => {
+    if (currentLineEntries.length && currentPatternRules.length && !frequencyGraphPanel.classList.contains('d-none')) {
+        renderFrequencyGraph(currentLineEntries, currentPatternRules);
+    }
+});
+
+if (window.ResizeObserver && frequencyGraph) {
+    let lastGraphWidth = 0;
+    const resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+            const currentWidth = entry.contentRect.width;
+            if (currentWidth > 0 && Math.abs(currentWidth - lastGraphWidth) > 2) {
+                lastGraphWidth = currentWidth;
+                if (currentLineEntries.length && currentPatternRules.length && !frequencyGraphPanel.classList.contains('d-none')) {
+                    renderFrequencyGraph(currentLineEntries, currentPatternRules);
+                }
+            }
+        }
+    });
+    resizeObserver.observe(frequencyGraph);
+}
 
 restorePatternSettings();
 loadDefaultLogFile();

@@ -15,19 +15,35 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="container">
-    <div class="row">
-        <div class="col-12 d-flex justify-content-between align-items-center mb-3">
+<div class="container-fluid app-container">
+    <div class="row header-row">
+        <div class="col-12 d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2 header-bar">
             <h1 class="mb-0">Log Viewer</h1>
-            <a href="help.html" class="btn btn-outline-primary btn-sm">Help &amp; Pattern Guide</a>
+            <div class="d-flex align-items-center gap-3 header-controls">
+                <div class="header-toggles d-flex align-items-center gap-3">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="wrap-lines-toggle" checked>
+                        <label class="form-check-label" for="wrap-lines-toggle">Wrap lines</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="compact-toggle">
+                        <label class="form-check-label" for="compact-toggle">Compact</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="dark-mode-toggle">
+                        <label class="form-check-label" for="dark-mode-toggle">Dark mode</label>
+                    </div>
+                </div>
+                <a href="help.html" class="btn btn-outline-primary btn-sm">Help &amp; Pattern Guide</a>
+            </div>
         </div>
     </div>
-    <div class="row g-3">
-        <div class="col-lg-9">
-            <div id="log" class="log-viewer" aria-live="polite"></div>
+    <div class="row g-3 main-content-row flex-grow-1 overflow-hidden">
+        <div class="col-lg-9 h-100 d-flex flex-column">
+            <div id="log" class="log-viewer flex-grow-1" aria-live="polite"></div>
         </div>
-        <div class="col-lg-3 toolbar">
-            <div class="button-row">
+        <div class="col-lg-3 toolbar h-100 d-flex flex-column overflow-auto">
+            <div class="button-row flex-shrink-0">
                 <input type="file" id="file" class="form-control" accept=".log,.txt,.out,.json">
                 <div class="action-buttons d-flex gap-2 mt-2">
                     <button id="clear" class="btn btn-secondary">Clear</button>
@@ -36,14 +52,16 @@
                 </div>
             </div>
 
-            <div id="pattern-container" class="pattern-controls">
+            <div id="pattern-container" class="pattern-controls flex-grow-1">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <label class="form-label mb-0">Patterns</label>
                     <button id="add-pattern" class="btn btn-sm btn-outline-primary" type="button">Add</button>
                 </div>
                 <div id="pattern-list"></div>
                 <div class="mt-2 d-flex gap-2">
-                    <button id="export-patterns" class="btn btn-sm btn-outline-secondary" type="button">Export settings</button>
+                    <button id="export-patterns" class="btn btn-sm btn-outline-secondary" type="button">Export
+                        settings
+                    </button>
                     <label class="btn btn-sm btn-outline-secondary mb-0" for="import-patterns">Import settings</label>
                     <input type="file" id="import-patterns" class="d-none" accept="application/json,.json">
                 </div>
@@ -65,11 +83,13 @@
                                 </div>
                                 <div>
                                     <label class="form-label mb-0 small" for="graph-update-delay">Delay (ms)</label>
-                                    <input id="graph-update-delay" class="form-control form-control-sm" type="number" min="0" max="5000" step="50" value="200">
+                                    <input id="graph-update-delay" class="form-control form-control-sm" type="number"
+                                           min="0" max="5000" step="50" value="200">
                                 </div>
                                 <div>
                                     <label class="form-label mb-0 small" for="frequency-bin-count">Bins</label>
-                                    <input id="frequency-bin-count" class="form-control form-control-sm" type="number" min="2" max="500" step="1" value="24">
+                                    <input id="frequency-bin-count" class="form-control form-control-sm" type="number"
+                                           min="2" max="500" step="1" value="24">
                                 </div>
                             </div>
                             <div id="frequency-graph" class="frequency-graph"></div>
